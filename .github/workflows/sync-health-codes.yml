@@ -1,0 +1,43 @@
+name: Sync health-codes.json from fund-calc
+
+on:
+  schedule:
+    - cron: '0 2 * * *'   # 每天 UTC 02:00（台灣時間早上 10:00）
+  workflow_dispatch:       # 允許手動觸發
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fetch latest health-codes.json
+        run: |
+          mkdir -p data
+          curl -sSL "https://fund-calculator.pages.dev/data/health-codes.json" -o data/health-codes.json.new
+          # 驗證 JSON 合法且有 items
+          node -e "const d=require('./data/health-codes.json.new');if(!d.items||!Array.isArray(d.items)||d.items.length<1000){console.error('Invalid data');process.exit(1)}console.log('OK '+d.items.length+' items')"
+
+      - name: Compare and replace
+        id: diff
+        run: |
+          if [ ! -f data/health-codes.json ] || ! cmp -s data/health-codes.json data/health-codes.json.new; then
+            mv data/health-codes.json.new data/health-codes.json
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            rm data/health-codes.json.new
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit and push
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/health-codes.json
+          git commit -m "chore: sync health-codes.json from fund-calc $(date -u +%Y-%m-%d)"
+          git push
