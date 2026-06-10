@@ -110,7 +110,7 @@ html,body{font-family:'Noto Sans TC',sans-serif;background:#faf6f0;color:#1e293b
 .thin-cta a:hover{background:#047857;color:#fff}
 
 /* 功能卡片 */
-.fn-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}
+.fn-row{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:14px}
 .fn{background:#fff;border-radius:12px;padding:11px 14px;border:1px solid #d1fae5;cursor:pointer;transition:.15s;text-align:center}
 .fn:hover,.fn.active{background:#ecfdf5;border-color:#047857;transform:translateY(-1px)}
 .fn .fn-t{font-weight:800;font-size:.92rem;color:#065f46;margin-bottom:2px}
@@ -189,6 +189,8 @@ html,body{font-family:'Noto Sans TC',sans-serif;background:#faf6f0;color:#1e293b
 .footer-meta{margin-top:16px;text-align:center;font-size:.7rem;color:#94a3b8;line-height:1.7}
 .footer-meta a{color:#64748b;text-decoration:none}
 
+/* 平板 */
+@media(max-width:768px){.fn-row{grid-template-columns:repeat(3,1fr)}}
 /* 手機 */
 @media(max-width:480px){
   .wrap{padding:12px 10px 60px}
@@ -203,6 +205,8 @@ html,body{font-family:'Noto Sans TC',sans-serif;background:#faf6f0;color:#1e293b
   .footer-cta .tools{gap:10px;font-size:.72rem}
 }
 
+.equiv-row{cursor:pointer;transition:.12s}
+.equiv-row:hover{background:#f0fdf4}
 /* Highlight */
 mark{background:#fef08a;color:#854d0e;padding:0 2px;border-radius:2px;font-weight:700}
 </style>
@@ -238,6 +242,10 @@ mark{background:#fef08a;color:#854d0e;padding:0 2px;border-radius:2px;font-weigh
   <div class="fn" data-mode="calc" onclick="setMode('calc')">
     <div class="fn-t">💰 點數試算</div>
     <div class="fn-s">自費差額對照</div>
+  </div>
+  <div class="fn" data-mode="equiv" onclick="setMode('equiv')">
+    <div class="fn-t">⚖️ 程度相當</div>
+    <div class="fn-s">條款對照估算</div>
   </div>
 </div>
 
@@ -311,6 +319,19 @@ mark{background:#fef08a;color:#854d0e;padding:0 2px;border-radius:2px;font-weigh
     <div class="search-hint">顯示健保點數 + 換算金額，對比醫院自費帳單差額</div>
   </div>
   <div class="results" id="calc-results"><div class="empty"><div class="emo">💰</div>輸入查詢，看點數 × 點值 = 健保給付金額；醫院帳單 - 健保給付 = 自費差額</div></div>
+</div>
+
+<!-- Mode: equiv -->
+<div id="mode-equiv" style="display:none">
+  <div class="intro">
+    ⚖️ <b>程度相當評估：</b>保單手術表查不到某台手術時，依健保申報點數對照「程度相當」的給付級別，給付估算僅供參考，實際由保險公司理賠人員裁量。
+  </div>
+  <div class="search-box">
+    <input type="text" id="q-equiv" placeholder="輸入手術關鍵字或代碼（如 心臟、64001C、脊椎）" oninput="runEquiv()">
+    <div class="search-hint">🔪 僅搜尋第 2-2-7 章「手術」 · 點選任一筆查看各保單程度相當估算</div>
+  </div>
+  <div id="equiv-panel" style="margin-bottom:14px"></div>
+  <div class="results" id="equiv-list"><div class="empty"><div class="emo">⚖️</div>輸入關鍵字搜尋手術，點選後查看各保單程度相當給付</div></div>
 </div>
 
 <div id="loading" class="loading" style="display:none">📥 載入健保資料庫...</div>
@@ -404,7 +425,7 @@ async function loadData(){
 function setMode(m){
   mode = m;
   document.querySelectorAll('.fn').forEach(f=>f.classList.toggle('active', f.dataset.mode===m));
-  ['search','vs','chapter','calc'].forEach(x=>{
+  ['search','vs','chapter','calc','equiv'].forEach(x=>{
     document.getElementById('mode-'+x).style.display = x===m ? '' : 'none';
   });
   if(m==='vs') runVs();
@@ -612,6 +633,120 @@ function runCalc(){
       ${it.p ? `<div class="pt">${it.p.toLocaleString()} 點</div><div class="ntd" style="color:#047857">健保 ${toNtd(it.p)}</div>` : '<div class="pt" style="color:#94a3b8">無</div>'}
     </div>
   </div>`).join('');
+}
+
+
+// ═════════════ 程度相當 ═════════════
+const SURGERY_TIERS = [
+  { tier:1, min:0,     max:2499,     label:'極輕微', color:'#6b7280',  HNRC:'1–3%',    XHR:'10–16%',   NIR:'5–10',    examples:'簡單耳膜切開、表皮清創、引流術' },
+  { tier:2, min:2500,  max:4999,     label:'輕微',   color:'#0284c7',  HNRC:'4–9%',    XHR:'16–30%',   NIR:'10–30',   examples:'單側疝氣、扁桃腺切除、鼻中膈' },
+  { tier:3, min:5000,  max:8999,     label:'輕度',   color:'#059669',  HNRC:'10–20%',  XHR:'30–55%',   NIR:'30–60',   examples:'闌尾切除、腹腔鏡膽囊、卵巢囊腫' },
+  { tier:4, min:9000,  max:14999,    label:'中輕',   color:'#ca8a04',  HNRC:'21–32%',  XHR:'55–84%',   NIR:'60–100',  examples:'子宮部分切除、甲狀腺部分、食道切除' },
+  { tier:5, min:15000, max:24999,    label:'中度',   color:'#d97706',  HNRC:'33–50%',  XHR:'84–130%',  NIR:'100–150', examples:'胃全切、直腸吻合、全膝關節置換' },
+  { tier:6, min:25000, max:39999,    label:'中重',   color:'#ea580c',  HNRC:'51–70%',  XHR:'130–200%', NIR:'150–200', examples:'開顱（中等）、多節脊椎融合、腸癌根治' },
+  { tier:7, min:40000, max:59999,    label:'重度',   color:'#dc2626',  HNRC:'71–90%',  XHR:'200–270%', NIR:'200–260', examples:'冠脈繞道 1–2 條、心臟瓣膜置換' },
+  { tier:8, min:60000, max:Infinity, label:'極重',   color:'#7c3aed',  HNRC:'91–100%', XHR:'270–400%+',NIR:'260–300', examples:'冠脈繞道 3 條+、器官移植、顯微重建' },
+];
+let equivList = [];
+
+function runEquiv(){
+  if(!DATA) return;
+  const q = document.getElementById('q-equiv').value.trim();
+  if(!q){
+    equivList = [];
+    document.getElementById('equiv-list').innerHTML = '<div class="empty"><div class="emo">⚖️</div>輸入關鍵字搜尋手術，點選後查看各保單程度相當給付</div>';
+    return;
+  }
+  const qu = q.toUpperCase();
+  const list = DATA.items.filter(it => it.ch === '227' &&
+    (it.c.includes(qu) || it.n.includes(q) || (it.e||'').toUpperCase().includes(qu) || (it.s||'').includes(q)));
+  equivList = list.slice(0, 100);
+  const rEl = document.getElementById('equiv-list');
+  if(!equivList.length){ rEl.innerHTML = '<div class="empty"><div class="emo">😕</div>找不到符合的 227 手術代碼</div>'; return; }
+  rEl.innerHTML = '<div class="r-head"><span>🔪 找到 <b>' + list.length + '</b> 筆 227 手術 · 點一筆查程度相當給付</span></div>' +
+    equivList.map((it, i) =>
+      '<div class="r-item equiv-row" onclick="selectEquivByIdx(' + i + ')">' +
+      '<div class="r-code">' + (it.c||'—') + '</div>' +
+      '<div class="r-body"><div class="r-name">' + highlight(it.n, q) + '</div>' + (it.s ? '<div class="r-en">' + it.s + '</div>' : '') + '</div>' +
+      '<div class="r-pts">' + (it.p ? '<div class="pt">' + it.p.toLocaleString() + ' 點</div>' : '<div class="pt" style="color:#94a3b8">無點數</div>') +
+      '<div style="font-size:.6rem;color:#047857;font-weight:700;margin-top:2px">點選分析 ▸</div></div>' +
+      '</div>'
+    ).join('');
+}
+
+function getTier(pts){
+  if(!pts || pts <= 0) return null;
+  return SURGERY_TIERS.find(t => pts >= t.min && pts <= t.max) || SURGERY_TIERS[SURGERY_TIERS.length - 1];
+}
+
+function selectEquivByIdx(i){
+  const it = equivList[i];
+  if(!it) return;
+  const pts = it.p, name = it.n, code = it.c || '';
+  const tier = getTier(pts);
+  const panel = document.getElementById('equiv-panel');
+  if(!pts || !tier){
+    panel.innerHTML = '<div style="background:#fef9c3;border:1px solid #fde047;border-radius:10px;padding:14px 16px;color:#713f12">' +
+      '<b>⚠️ 此項目無健保申報點數</b><br>' +
+      '<span style="font-size:.8rem">' + (code ? '[' + code + '] ' : '') + name + ' — 無點數記錄，建議參照相似術式人工比對。</span></div>';
+    panel.scrollIntoView({behavior:'smooth', block:'start'});
+    return;
+  }
+  const nearby = DATA.items.filter(it2 =>
+    it2.ch === '227' && it2.p && it2.c !== code && Math.abs(it2.p - pts) / pts <= 0.25
+  ).sort((a, b) => Math.abs(a.p - pts) - Math.abs(b.p - pts)).slice(0, 6);
+  const tc = tier.color;
+  panel.innerHTML =
+    '<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:12px;padding:14px 16px;margin-bottom:12px">' +
+      '<div style="font-size:.7rem;color:#0369a1;font-weight:700;margin-bottom:3px">📌 已選手術</div>' +
+      '<div style="font-weight:800;font-size:.98rem;color:#0c4a6e">' + (code ? '[' + code + '] ' : '') + name + '</div>' +
+      '<div style="font-size:.8rem;color:#0284c7;margin-top:3px">健保申報：<b>' + pts.toLocaleString() + ' 點</b></div>' +
+    '</div>' +
+    '<div style="background:' + tc + '15;border:2px solid ' + tc + ';border-radius:12px;padding:12px 16px;margin-bottom:12px;display:flex;align-items:center;gap:14px">' +
+      '<div style="text-align:center;min-width:64px">' +
+        '<div style="font-size:2rem;font-weight:900;color:' + tc + ';line-height:1">Lv.' + tier.tier + '</div>' +
+        '<div style="font-size:.72rem;font-weight:800;color:' + tc + '">' + tier.label + '</div>' +
+      '</div>' +
+      '<div style="flex:1;font-size:.78rem;color:#475569;line-height:1.6">' +
+        '<b>點數區間：</b>' + tier.min.toLocaleString() + '–' + (tier.max === Infinity ? '60,000+' : tier.max.toLocaleString()) + ' 點<br>' +
+        '<b>代表手術：</b>' + tier.examples +
+      '</div>' +
+    '</div>' +
+    '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;margin-bottom:12px">' +
+      '<div style="background:#1e3a5f;color:#fff;padding:9px 14px;font-size:.82rem;font-weight:700">💰 各保單程度相當給付估算</div>' +
+      '<table style="width:100%;border-collapse:collapse">' +
+        '<tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0">' +
+          '<td style="padding:10px 14px;font-weight:800;width:22%">HNRC</td>' +
+          '<td style="padding:10px;font-size:.78rem;color:#64748b">以保額比例給付<br><span style="font-size:.68rem">（封頂 100%）</span></td>' +
+          '<td style="padding:10px 14px;font-weight:900;font-size:1.1rem;color:#0284c7;text-align:right">' + tier.HNRC + '</td>' +
+        '</tr>' +
+        '<tr style="border-bottom:1px solid #e2e8f0">' +
+          '<td style="padding:10px 14px;font-weight:800">XHR</td>' +
+          '<td style="padding:10px;font-size:.78rem;color:#64748b">以基本保額比例給付<br><span style="font-size:.68rem">（顯微手術另加）</span></td>' +
+          '<td style="padding:10px 14px;font-weight:900;font-size:1.1rem;color:#dc2626;text-align:right">' + tier.XHR + '</td>' +
+        '</tr>' +
+        '<tr>' +
+          '<td style="padding:10px 14px;font-weight:800">NIR</td>' +
+          '<td style="padding:10px;font-size:.78rem;color:#64748b">以給付基數倍給付<br><span style="font-size:.68rem">（器官移植另計）</span></td>' +
+          '<td style="padding:10px 14px;font-weight:900;font-size:1.1rem;color:#059669;text-align:right">' + tier.NIR + ' 基數</td>' +
+        '</tr>' +
+      '</table>' +
+    '</div>' +
+    (nearby.length ?
+      '<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;padding:12px 14px;margin-bottom:12px">' +
+        '<div style="font-size:.72rem;font-weight:700;color:#92400e;margin-bottom:8px">🔍 表內點數相近的手術（±25%，可作為比照錨點）</div>' +
+        nearby.map(it2 =>
+          '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #fef3c7;font-size:.8rem">' +
+          '<span style="color:#1e293b;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:8px">' + (it2.c ? '[' + it2.c + '] ' : '') + it2.n + '</span>' +
+          '<span style="color:#d97706;font-weight:700;white-space:nowrap">' + it2.p.toLocaleString() + ' 點</span>' +
+          '</div>'
+        ).join('') +
+      '</div>'
+    : '') +
+    '<div style="background:#f1f5f9;border-radius:8px;padding:10px 14px;font-size:.74rem;color:#64748b;line-height:1.65">' +
+      '⚠️ <b>注意：</b>此估算僅供參考，實際給付由保險公司理賠人員依條款裁量。主張「程度相當」時建議提供健保申報明細（含代碼與點數）及主治醫師說明，以表內最接近點數的手術項目為比照依據。' +
+    '</div>';
+  panel.scrollIntoView({behavior:'smooth', block:'nearest'});
 }
 
 loadData();
