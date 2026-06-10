@@ -637,90 +637,163 @@ function runCalc(){
 
 
 // ═════════════ 程度相當 ═════════════
-const SURGERY_TIERS = [
-  { tier:1, min:0,     max:2499,     label:'極輕微', color:'#6b7280',  HNRC:'1–3%',    XHR:'10–16%',   NIR:'5–10',    examples:'簡單耳膜切開、表皮清創、引流術' },
-  { tier:2, min:2500,  max:4999,     label:'輕微',   color:'#0284c7',  HNRC:'4–9%',    XHR:'16–30%',   NIR:'10–30',   examples:'單側疝氣、扁桃腺切除、鼻中膈' },
-  { tier:3, min:5000,  max:8999,     label:'輕度',   color:'#059669',  HNRC:'10–20%',  XHR:'30–55%',   NIR:'30–60',   examples:'闌尾切除、腹腔鏡膽囊、卵巢囊腫' },
-  { tier:4, min:9000,  max:14999,    label:'中輕',   color:'#ca8a04',  HNRC:'21–32%',  XHR:'55–84%',   NIR:'60–100',  examples:'子宮部分切除、甲狀腺部分、食道切除' },
-  { tier:5, min:15000, max:24999,    label:'中度',   color:'#d97706',  HNRC:'33–50%',  XHR:'84–130%',  NIR:'100–150', examples:'胃全切、直腸吻合、全膝關節置換' },
-  { tier:6, min:25000, max:39999,    label:'中重',   color:'#ea580c',  HNRC:'51–70%',  XHR:'130–200%', NIR:'150–200', examples:'開顱（中等）、多節脊椎融合、腸癌根治' },
-  { tier:7, min:40000, max:59999,    label:'重度',   color:'#dc2626',  HNRC:'71–90%',  XHR:'200–270%', NIR:'200–260', examples:'冠脈繞道 1–2 條、心臟瓣膜置換' },
-  { tier:8, min:60000, max:Infinity, label:'極重',   color:'#7c3aed',  HNRC:'91–100%', XHR:'270–400%+',NIR:'260–300', examples:'冠脈繞道 3 條+、器官移植、顯微重建' },
+const BUILTIN_PRODUCTS = [
+  { id:'HNRC', label:'HNRC', unitLabel:'% 保額',    unit:'%',   color:'#0284c7', base:40000, cap:100,  note:'封頂100%' },
+  { id:'XHR',  label:'XHR',  unitLabel:'% 基本保額', unit:'%',   color:'#dc2626', base:18000, cap:null, note:'顯微手術另加' },
+  { id:'NIR',  label:'NIR',  unitLabel:'給付基數',   unit:'基數', color:'#059669', base:185,   cap:null, note:'器官移植另計' },
 ];
-let equivList = [];
+const CUSTOM_COLORS = ['#7c3aed','#0891b2','#be185d','#b45309','#0f766e'];
+
+function loadProducts(){
+  try{ return [...BUILTIN_PRODUCTS,...JSON.parse(localStorage.getItem('equivProducts')||'[]')]; }
+  catch(e){ return [...BUILTIN_PRODUCTS]; }
+}
+function getCustomProducts(){
+  try{ return JSON.parse(localStorage.getItem('equivProducts')||'[]'); }
+  catch(e){ return []; }
+}
+function saveCustomProducts(list){ localStorage.setItem('equivProducts',JSON.stringify(list)); }
+
+function calcBenefit(pts, p){
+  if(!pts||!p.base) return '—';
+  let v = p.unit==='%' ? Math.round(pts/p.base*100) : Math.round(pts/p.base);
+  if(p.cap && v>p.cap) v=p.cap;
+  return v+(p.unit==='%'?'%':'');
+}
+
+let equivList=[], _panelCtx={code:'',name:'',pts:0};
 
 function runEquiv(){
   if(!DATA) return;
-  const q = document.getElementById('q-equiv').value.trim();
+  const q=document.getElementById('q-equiv').value.trim();
   if(!q){
-    equivList = [];
-    document.getElementById('equiv-list').innerHTML = '<div class="empty"><div class="emo">⚖️</div>輸入關鍵字搜尋手術，點選後查看各保單程度相當給付</div>';
+    equivList=[];
+    document.getElementById('equiv-list').innerHTML='<div class="empty"><div class="emo">💡</div>輸入關鍵字搜尋手術，點選後查看各保單程度相當給付</div>';
+    document.getElementById('equiv-panel').innerHTML='';
     return;
   }
-  const qu = q.toUpperCase();
-  const list = DATA.items.filter(it => it.ch === '227' &&
-    (it.c.includes(qu) || it.n.includes(q) || (it.e||'').toUpperCase().includes(qu) || (it.s||'').includes(q)));
-  equivList = list.slice(0, 100);
-  const rEl = document.getElementById('equiv-list');
-  if(!equivList.length){ rEl.innerHTML = '<div class="empty"><div class="emo">😕</div>找不到符合的 227 手術代碼</div>'; return; }
-  rEl.innerHTML = '<div class="r-head"><span>🔪 找到 <b>' + list.length + '</b> 筆 227 手術 · 點一筆查程度相當給付</span></div>' +
-    equivList.map((it, i) =>
-      '<div class="r-item equiv-row" onclick="selectEquivByIdx(' + i + ')">' +
-      '<div class="r-code">' + (it.c||'—') + '</div>' +
-      '<div class="r-body"><div class="r-name">' + highlight(it.n, q) + '</div>' + (it.s ? '<div class="r-en">' + it.s + '</div>' : '') + '</div>' +
-      '<div class="r-pts">' + (it.p ? '<div class="pt">' + it.p.toLocaleString() + ' 點</div>' : '<div class="pt" style="color:#94a3b8">無點數</div>') +
-      '<div style="font-size:.6rem;color:#047857;font-weight:700;margin-top:2px">點選分析 ▸</div></div>' +
-      '</div>'
+  const qu=q.toUpperCase();
+  const list=DATA.items.filter(it=>it.ch==='227'&&(it.c.includes(qu)||it.n.includes(q)||(it.e||'').toUpperCase().includes(qu)||(it.s||'').includes(q)));
+  equivList=list.slice(0,100);
+  const rEl=document.getElementById('equiv-list');
+  if(!equivList.length){rEl.innerHTML='<div class="empty"><div class="emo">😕</div>找不到符合的 227 手術代碼</div>';return;}
+  rEl.innerHTML='<div class="r-head"><span>🔪 找到 <b>'+list.length+'</b> 筆 · 點一筆查程度相當給付</span></div>'+
+    equivList.map((it,i)=>
+      '<div class="r-item equiv-row" onclick="selectEquivByIdx('+i+')">'+
+      '<div class="r-code">'+(it.c||'—')+'</div>'+
+      '<div class="r-body"><div class="r-name">'+highlight(it.n,q)+'</div>'+(it.s?'<div class="r-en">'+it.s+'</div>':'')+'</div>'+
+      '<div class="r-pts">'+(it.p?'<div class="pt">'+it.p.toLocaleString()+' 點</div>':'<div class="pt" style="color:#94a3b8">無點數</div>')+
+      '<div style="font-size:.6rem;color:#047857;font-weight:700;margin-top:2px">點選分析 ▸</div></div></div>'
     ).join('');
 }
 
-function getTier(pts){
-  if(!pts || pts <= 0) return null;
-  return SURGERY_TIERS.find(t => pts >= t.min && pts <= t.max) || SURGERY_TIERS[SURGERY_TIERS.length - 1];
+function selectEquivByIdx(i){
+  const it=equivList[i]; if(!it) return;
+  _panelCtx={code:it.c||'',name:it.n,pts:it.p||0};
+  renderEquivPanel();
 }
 
-function selectEquivByIdx(i){
-  const it = equivList[i];
-  if(!it) return;
-  const pts = it.p, name = it.n, code = it.c || '';
-  const tier = getTier(pts);
-  const panel = document.getElementById('equiv-panel');
-  if(!pts || !tier){
-    panel.innerHTML =
-      '<div style="background:#fef9c3;border:1px solid #fde047;border-radius:10px;padding:12px 14px;color:#713f12;font-size:.84rem">' +
+function renderEquivPanel(){
+  const {code,name,pts}=_panelCtx;
+  const panel=document.getElementById('equiv-panel');
+  if(!pts){
+    panel.innerHTML='<div style="background:#fef9c3;border:1px solid #fde047;border-radius:10px;padding:12px 14px;color:#713f12;font-size:.84rem">'+
       '⚠️ 此手術無健保申報點數，無法自動估算，請依條款人工比對。</div>';
-    panel.scrollIntoView({behavior:'smooth', block:'nearest'});
-    return;
+    panel.scrollIntoView({behavior:'smooth',block:'nearest'}); return;
   }
-  const tc = tier.color;
-  panel.innerHTML =
+  const products=loadProducts();
+  const rows=products.map((p,idx)=>{
+    const val=calcBenefit(pts,p);
+    const isCustom=idx>=BUILTIN_PRODUCTS.length;
+    return '<tr style="border-bottom:1px solid #f1f5f9'+(idx%2===1?';background:#fafafa':'')+'">' +
+      '<td style="padding:10px 14px;font-weight:800;font-size:.88rem">' +
+        '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+p.color+';margin-right:5px"></span>' +
+        p.label+(isCustom?' <span style="font-size:.68rem;color:#94a3b8;cursor:pointer;font-weight:400" data-pid="'+p.id+'" onclick="deleteCustomProduct(this)">✕</span>':'') +
+      '</td>' +
+      '<td style="padding:10px;font-size:.76rem;color:#64748b">'+p.unitLabel+(p.note?'<br><span style="font-size:.68rem">（'+p.note+'）</span>':'')+'</td>' +
+      '<td style="padding:10px 14px;font-weight:900;font-size:1.1rem;color:'+p.color+';text-align:right">'+val+'</td>' +
+    '</tr>';
+  }).join('');
+
+  panel.innerHTML=
     '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">' +
       '<div style="background:#f8fafc;padding:10px 14px;border-bottom:1px solid #e2e8f0;font-size:.84rem;color:#1e293b">' +
-        '<b>' + (code ? '[' + code + '] ' : '') + name + '</b>' +
-        '<span style="margin-left:8px;color:#0284c7;font-weight:700">' + pts.toLocaleString() + ' 點</span>' +
-        '<span style="margin-left:8px;display:inline-block;background:' + tc + ';color:#fff;padding:1px 8px;border-radius:10px;font-size:.72rem;font-weight:800">' + tier.label + '</span>' +
+        '<b>'+(code?'['+code+'] ':'')+name+'</b>' +
+        ' <span style="color:#0284c7;font-weight:700">'+pts.toLocaleString()+' 點</span>' +
       '</div>' +
-      '<table style="width:100%;border-collapse:collapse">' +
-        '<tr style="border-bottom:1px solid #f1f5f9">' +
-          '<td style="padding:11px 14px;font-weight:800;width:25%;font-size:.88rem">HNRC</td>' +
-          '<td style="padding:11px 14px;font-size:.78rem;color:#64748b">% 保額（封頂100%）</td>' +
-          '<td style="padding:11px 14px;font-weight:900;font-size:1.15rem;color:#0284c7;text-align:right">' + tier.HNRC + '</td>' +
-        '</tr>' +
-        '<tr style="border-bottom:1px solid #f1f5f9;background:#fafafa">' +
-          '<td style="padding:11px 14px;font-weight:800;font-size:.88rem">XHR</td>' +
-          '<td style="padding:11px 14px;font-size:.78rem;color:#64748b">% 基本保額</td>' +
-          '<td style="padding:11px 14px;font-weight:900;font-size:1.15rem;color:#dc2626;text-align:right">' + tier.XHR + '</td>' +
-        '</tr>' +
-        '<tr>' +
-          '<td style="padding:11px 14px;font-weight:800;font-size:.88rem">NIR</td>' +
-          '<td style="padding:11px 14px;font-size:.78rem;color:#64748b">給付基數</td>' +
-          '<td style="padding:11px 14px;font-weight:900;font-size:1.15rem;color:#059669;text-align:right">' + tier.NIR + '</td>' +
-        '</tr>' +
-      '</table>' +
-      '<div style="padding:8px 14px;font-size:.72rem;color:#94a3b8;border-top:1px solid #f1f5f9">估算僅供參考，以表內最接近點數的手術項目為比照依據</div>' +
+      '<table style="width:100%;border-collapse:collapse">'+rows+'</table>' +
+      '<div style="padding:8px 14px;font-size:.72rem;color:#94a3b8;border-top:1px solid #f1f5f9">估算僅供參考，實際給付由保險公司裁量</div>' +
+    '</div>' +
+    '<button onclick="toggleAddForm()" style="width:100%;margin-top:8px;padding:9px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;cursor:pointer;font-size:.82rem;color:#475569;font-family:inherit;font-weight:700">＋ 新增條款產品</button>' +
+    '<div id="add-product-form" style="display:none;margin-top:8px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px">' +
+      '<div style="font-weight:800;font-size:.88rem;color:#1e293b;margin-bottom:10px">新增條款產品</div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">' +
+        '<div><div style="font-size:.74rem;color:#64748b;margin-bottom:4px">產品代號</div>' +
+          '<input id="np-label" type="text" placeholder="如 NXF、全球乙型" style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:.88rem;font-family:inherit"></div>' +
+        '<div><div style="font-size:.74rem;color:#64748b;margin-bottom:4px">給付單位</div>' +
+          '<select id="np-unit" onchange="updateUnitLabel(this.value)" style="width:100%;padding:7px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:.88rem;font-family:inherit;background:#fff">' +
+            '<option value="%">% 保額</option><option value="基數">給付基數</option>' +
+          '</select></div>' +
+      '</div>' +
+      '<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 12px;margin-bottom:10px">' +
+        '<div style="font-size:.74rem;font-weight:700;color:#0369a1;margin-bottom:6px">校準：用「'+name+'」（'+pts.toLocaleString()+' 點）當錨點</div>' +
+        '<div style="display:flex;align-items:center;gap:8px">' +
+          '<span style="font-size:.82rem;color:#1e293b">條款給付：</span>' +
+          '<input id="np-anchor-val" type="number" min="0" step="0.5" placeholder="如 46" oninput="updateBasePreview()" ' +
+            'style="width:80px;padding:6px 8px;border:1px solid #bae6fd;border-radius:6px;font-size:.92rem;text-align:right;font-family:inherit;font-weight:700">' +
+          '<span id="np-unit-lbl" style="font-size:.82rem;color:#64748b">%</span>' +
+        '</div>' +
+        '<div id="np-base-preview" style="font-size:.76rem;color:#0284c7;margin-top:6px;min-height:18px"></div>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px">' +
+        '<button onclick="confirmAddProduct()" style="flex:1;padding:9px;background:#047857;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:.86rem;font-weight:800;font-family:inherit">加入比對</button>' +
+        '<button onclick="closeAddForm()" style="padding:9px 14px;background:#f1f5f9;color:#475569;border:none;border-radius:8px;cursor:pointer;font-size:.86rem;font-family:inherit">取消</button>' +
+      '</div>' +
     '</div>';
-  panel.scrollIntoView({behavior:'smooth', block:'nearest'});
+
+  panel.scrollIntoView({behavior:'smooth',block:'nearest'});
 }
+
+function closeAddForm(){var f=document.getElementById("add-product-form");if(f)f.style.display="none";}
+function toggleAddForm(){
+  const f=document.getElementById('add-product-form');
+  if(f) f.style.display=f.style.display==='none'?'':'none';
+}
+
+function updateUnitLabel(v){var el=document.getElementById("np-unit-lbl");if(el)el.textContent=v==="%"?"%":"基數";}
+
+function updateBasePreview(){
+  const pts=_panelCtx.pts;
+  const val=parseFloat(document.getElementById('np-anchor-val').value);
+  const unit=document.getElementById('np-unit').value;
+  const preview=document.getElementById('np-base-preview');
+  if(!preview) return;
+  if(!val||val<=0){preview.textContent='';return;}
+  const base=unit==='%'?Math.round(pts/val*100):Math.round(pts/val);
+  preview.textContent='→ 估算基準：每'+(unit==='%'?'百分比':'基數')+'約 '+base.toLocaleString()+' 健保點';
+}
+
+function confirmAddProduct(){
+  const label=document.getElementById('np-label').value.trim();
+  const unit=document.getElementById('np-unit').value;
+  const anchorVal=parseFloat(document.getElementById('np-anchor-val').value);
+  if(!label){alert('請填入產品代號');return;}
+  if(!anchorVal||anchorVal<=0){alert('請填入條款給付數值');return;}
+  const pts=_panelCtx.pts;
+  const base=unit==='%'?Math.round(pts/anchorVal*100):Math.round(pts/anchorVal);
+  const custom=getCustomProducts();
+  const color=CUSTOM_COLORS[custom.length%CUSTOM_COLORS.length];
+  custom.push({id:label+'_'+Date.now(),label,unitLabel:unit==='%'?'% 保額':'給付基數',unit,color,base,cap:null,note:'自訂校準',custom:true});
+  saveCustomProducts(custom);
+  renderEquivPanel();
+}
+
+function deleteCustomProduct(el){const id=el.getAttribute("data-pid");
+  if(!confirm('確定移除「'+id.replace(/_\d+$/,'')+' 」？')) return;
+  saveCustomProducts(getCustomProducts().filter(p=>p.id!==id));
+  renderEquivPanel();
+}
+
 
 loadData();
 </script>
